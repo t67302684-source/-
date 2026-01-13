@@ -4,15 +4,13 @@ import { ListingAnalysis, ImageAnalysisItem } from "../types";
 
 export class GeminiService {
   private getApiKey(): string {
-    // 兼容 Vite (VITE_API_KEY) 和标准环境变量 (API_KEY)
-    const key = (import.meta as any).env?.VITE_API_KEY || (process as any).env?.API_KEY;
-    return key || '';
+    return (process as any).env?.API_KEY || '';
   }
 
   private getAI() {
     const apiKey = this.getApiKey();
     if (!apiKey) {
-      throw new Error("API_KEY is missing. Please set VITE_API_KEY in Vercel Environment Variables.");
+      throw new Error("API_KEY 缺失，请在环境变量中设置。");
     }
     return new GoogleGenAI({ apiKey });
   }
@@ -22,9 +20,9 @@ export class GeminiService {
     try {
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
-        contents: `Search for Amazon product with ASIN/URL: ${asinOrUrl}. 
-        Extract: Title, 5 Bullets, Material, Color, Size.
-        Output ONLY JSON.`,
+        contents: `请搜索亚马逊产品 ASIN/链接: ${asinOrUrl}。
+        提取以下信息：标题 (Title)、5个卖点 (Bullet Points)、材质 (Material)、颜色 (Color)、尺寸 (Size)。
+        请直接输出 JSON 格式。`,
         config: {
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json",
@@ -53,7 +51,7 @@ export class GeminiService {
       return { data, sources };
     } catch (e: any) {
       console.error("Gemini Error:", e);
-      throw new Error(e.message || "Failed to analyze listing.");
+      throw new Error(e.message || "分析 Listing 失败。");
     }
   }
 
@@ -61,7 +59,8 @@ export class GeminiService {
     const ai = this.getAI();
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Product: ${listingData.title}. Generate 4 infographic image concepts with mainTitle, subTitle, content, designStrategy.`,
+      contents: `针对产品: ${listingData.title}。请策划4个高转化率的亚马逊详情页图片概念。
+      包含：主标题 (mainTitle)、副标题 (subTitle)、图片内容描述 (content)、设计策略 (designStrategy)。`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -96,6 +95,33 @@ export class GeminiService {
     if (part?.inlineData) {
       return `data:image/png;base64,${part.inlineData.data}`;
     }
-    throw new Error("No image generated.");
+    throw new Error("图像生成失败。");
+  }
+
+  async editImage(base64Image: string, editPrompt: string): Promise<string> {
+    const ai = this.getAI();
+    // 移除 base64 前缀
+    const base64Data = base64Image.split(',')[1] || base64Image;
+    
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              data: base64Data,
+              mimeType: 'image/png'
+            }
+          },
+          { text: `Based on this image, please edit it according to this instruction: ${editPrompt}. Keep the product itself consistent.` }
+        ]
+      }
+    });
+
+    const part = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+    if (part?.inlineData) {
+      return `data:image/png;base64,${part.inlineData.data}`;
+    }
+    throw new Error("图像修改失败。");
   }
 }

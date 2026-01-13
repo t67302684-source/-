@@ -28,4 +28,5 @@ export interface GeneratedImageItem {
   content: string;
   imageUrl?: string;
   status: 'idle' | 'generating' | 'done';
+  editPrompt?: string;
 }
