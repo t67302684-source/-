@@ -3,20 +3,15 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { ListingAnalysis, ImageAnalysisItem } from "../types";
 
 export class GeminiService {
-  private getApiKey(): string {
-    // 自动从 process.env.API_KEY 获取（AI Studio/Vercel 会自动注入已选中的 Key）
-    return (process as any).env?.API_KEY || '';
-  }
-
+  /* Only use process.env.API_KEY directly */
   private getAI() {
-    const apiKey = this.getApiKey();
-    // 每次调用都实例化以防止 Race Condition
-    return new GoogleGenAI({ apiKey });
+    return new GoogleGenAI({ apiKey: process.env.API_KEY });
   }
 
   async analyzeListing(asinOrUrl: string): Promise<{ data: ListingAnalysis, sources: any[] }> {
     const ai = this.getAI();
     try {
+      /* Using gemini-3-pro-preview for complex grounding tasks */
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: `请搜索亚马逊产品 ASIN/链接: ${asinOrUrl}。
@@ -45,12 +40,16 @@ export class GeminiService {
         }
       });
 
+      /* Accessing text property directly, not as a method */
       const data = JSON.parse(response.text || '{}');
       const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       return { data, sources };
     } catch (e: any) {
       console.error("Gemini Error:", e);
-      throw new Error(e.message || "分析失败。如果是 API Key 错误，请尝试重新设置。");
+      if (e.message?.includes("permission denied") || e.message?.includes("403")) {
+        throw new Error("API 权限被拒绝。请确保您的 API Key 来自已开启结算(Billing)的项目。");
+      }
+      throw new Error(e.message || "分析失败。");
     }
   }
 
@@ -83,10 +82,10 @@ export class GeminiService {
   async generateProductImage(prompt: string, aspectRatio: "1:1" | "16:9" | "4:3" = "1:1"): Promise<string> {
     const ai = this.getAI();
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
+      model: 'gemini-2.5-flash-image',
       contents: { parts: [{ text: prompt }] },
       config: {
-        imageConfig: { aspectRatio, imageSize: "1K" }
+        imageConfig: { aspectRatio }
       }
     });
 
@@ -102,7 +101,7 @@ export class GeminiService {
     const base64Data = base64Image.split(',')[1] || base64Image;
     
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
+      model: 'gemini-2.5-flash-image',
       contents: {
         parts: [
           {
@@ -115,7 +114,7 @@ export class GeminiService {
         ]
       },
       config: {
-        imageConfig: { aspectRatio: "1:1", imageSize: "1K" }
+        imageConfig: { aspectRatio: "1:1" }
       }
     });
 
