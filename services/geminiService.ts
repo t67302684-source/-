@@ -4,14 +4,13 @@ import { ListingAnalysis, ImageAnalysisItem } from "../types";
 
 export class GeminiService {
   private getApiKey(): string {
+    // 自动从 process.env.API_KEY 获取（AI Studio/Vercel 会自动注入已选中的 Key）
     return (process as any).env?.API_KEY || '';
   }
 
   private getAI() {
     const apiKey = this.getApiKey();
-    if (!apiKey) {
-      throw new Error("API_KEY 缺失，请在环境变量中设置。");
-    }
+    // 每次调用都实例化以防止 Race Condition
     return new GoogleGenAI({ apiKey });
   }
 
@@ -51,7 +50,7 @@ export class GeminiService {
       return { data, sources };
     } catch (e: any) {
       console.error("Gemini Error:", e);
-      throw new Error(e.message || "分析 Listing 失败。");
+      throw new Error(e.message || "分析失败。如果是 API Key 错误，请尝试重新设置。");
     }
   }
 
@@ -84,10 +83,10 @@ export class GeminiService {
   async generateProductImage(prompt: string, aspectRatio: "1:1" | "16:9" | "4:3" = "1:1"): Promise<string> {
     const ai = this.getAI();
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: 'gemini-3-pro-image-preview',
       contents: { parts: [{ text: prompt }] },
       config: {
-        imageConfig: { aspectRatio }
+        imageConfig: { aspectRatio, imageSize: "1K" }
       }
     });
 
@@ -100,11 +99,10 @@ export class GeminiService {
 
   async editImage(base64Image: string, editPrompt: string): Promise<string> {
     const ai = this.getAI();
-    // 移除 base64 前缀
     const base64Data = base64Image.split(',')[1] || base64Image;
     
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: 'gemini-3-pro-image-preview',
       contents: {
         parts: [
           {
@@ -113,8 +111,11 @@ export class GeminiService {
               mimeType: 'image/png'
             }
           },
-          { text: `Based on this image, please edit it according to this instruction: ${editPrompt}. Keep the product itself consistent.` }
+          { text: `Based on this image, please edit it: ${editPrompt}. Keep product consistency.` }
         ]
+      },
+      config: {
+        imageConfig: { aspectRatio: "1:1", imageSize: "1K" }
       }
     });
 
