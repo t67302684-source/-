@@ -19,21 +19,22 @@ export class GeminiService {
   async analyzeListing(asinOrUrl: string): Promise<{ data: ListingAnalysis, sources: any[] }> {
     try {
       const ai = this.getAI();
+      // 使用 gemini-3-flash-preview 替代 pro，以获得更高的免费配额
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: `你是一个亚马逊资深运营。请针对以下输入进行深度背景调查：
         输入内容：${asinOrUrl}
         
         任务指令：
-        1. 使用 Google Search 寻找该产品在全网（亚马逊、官网、评测站）的信息。
-        2. 如果直接访问链接被拦截，请搜索其型号名称或 ASIN 相关的参数规格。
-        3. 提取：产品全名(title)、5个核心卖点(bulletPoints)、材质(material)、颜色(color)、尺寸(size)。
-        4. 如果某些信息实在找不到，请根据产品类别和常识提供“合理的建议值”并在 other 字段中注明。
+        1. 使用 Google Search 寻找该产品在全网的信息。
+        2. 提取：产品全名(title)、5个核心卖点(bulletPoints)、材质(material)、颜色(color)、尺寸(size)。
+        3. 如果信息不全，请根据常识推测。
         
-        必须以 JSON 格式输出，不要包含任何其他文字。`,
+        必须以 JSON 格式输出。`,
         config: {
           tools: [{ googleSearch: {} }],
-          thinkingConfig: { thinkingBudget: 4000 },
+          // 降低思考预算以节省 Token，防止触发配额限制
+          thinkingConfig: { thinkingBudget: 0 }, 
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -69,13 +70,13 @@ export class GeminiService {
       return { data, sources };
     } catch (e: any) {
       console.error("Gemini Analysis Error:", e);
+      if (e.message?.includes("429") || e.message?.includes("quota")) {
+        throw new Error("API 配额已耗尽。请稍后再试，或前往 Google AI Studio 检查您的 API Key 是否绑定了结算账户。建议使用付费项目的 Key 以获得更稳定的体验。");
+      }
       if (e.message === "API_KEY_MISSING") {
         throw new Error("未检测到 API Key，请确保已正确配置。");
       }
-      if (e.message === "SEARCH_FAILED" || e.message === "INCOMPLETE_DATA") {
-        throw new Error("由于目标平台限制（反爬虫），AI 无法直接抓取该页面。请尝试输入：产品名称 + 核心参数，或者直接输入官网产品页链接。");
-      }
-      throw e;
+      throw new Error("分析失败。请检查 ASIN 是否正确，或者直接输入产品全名进行搜索。");
     }
   }
 
@@ -83,7 +84,7 @@ export class GeminiService {
     const ai = this.getAI();
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `针对产品: ${listingData.title}。请策划4个高转化率的亚马逊详情页图片概念。
+      contents: `针对产品: ${listingData.title}。请策划4个亚马逊图片概念。
       包含：主标题 (mainTitle)、副标题 (subTitle)、图片内容描述 (content)、设计策略 (designStrategy)。`,
       config: {
         responseMimeType: "application/json",
@@ -108,11 +109,12 @@ export class GeminiService {
 
   async generateProductImage(prompt: string, aspectRatio: "1:1" | "16:9" | "4:3" | "3:4" | "9:16" = "1:1"): Promise<string> {
     const ai = this.getAI();
+    // 降级为 gemini-2.5-flash-image 以确保免费配额可用
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
+      model: 'gemini-2.5-flash-image',
       contents: { parts: [{ text: prompt }] },
       config: {
-        imageConfig: { aspectRatio, imageSize: "1K" }
+        imageConfig: { aspectRatio }
       }
     });
 

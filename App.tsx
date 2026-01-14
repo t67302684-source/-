@@ -11,9 +11,10 @@ interface AIStudio {
   openSelectKey(): Promise<void>;
 }
 
+// Fixed declaration to avoid "identical modifiers" and "subsequent property" errors
 declare global {
   interface Window {
-    aistudio: AIStudio;
+    readonly aistudio: AIStudio;
   }
 }
 
