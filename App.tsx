@@ -5,18 +5,19 @@ import { ListingAnalysis, ImageAnalysisItem, GeneratedImageItem } from './types'
 import { AnalysisCard } from './components/AnalysisCard';
 import { ImageGenerationBlock } from './components/ImageGenerationBlock';
 
-// Define the interface for the AI Studio key selection utility
 interface AIStudio {
   hasSelectedApiKey(): Promise<boolean>;
   openSelectKey(): Promise<void>;
 }
 
-// Fixed declaration to avoid "identical modifiers" and "subsequent property" errors
 declare global {
   interface Window {
-    readonly aistudio: AIStudio;
+    // Removed readonly to match standard global property declarations and avoid modifier mismatch errors
+    aistudio: AIStudio;
   }
 }
+
+export type ModelType = 'gemini-3-pro-preview' | 'gemini-3-flash-preview';
 
 const App: React.FC = () => {
   const [asinInput, setAsinInput] = useState('');
@@ -25,11 +26,12 @@ const App: React.FC = () => {
   const [groundingSources, setGroundingSources] = useState<any[]>([]);
   const [imageConcepts, setImageConcepts] = useState<ImageAnalysisItem[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImageItem[]>([]);
+  const [selectedModel, setSelectedModel] = useState<ModelType>('gemini-3-flash-preview');
   
   const isEnvKeyAvailable = !!process.env.API_KEY && process.env.API_KEY !== 'undefined';
   const [hasApiKey, setHasApiKey] = useState<boolean>(isEnvKeyAvailable);
 
-  const gemini = new GeminiService();
+  const gemini = new GeminiService(selectedModel);
 
   useEffect(() => {
     const checkKey = async () => {
@@ -52,7 +54,6 @@ const App: React.FC = () => {
   const handleSelectKey = async () => {
     if (window.aistudio) {
       await window.aistudio.openSelectKey();
-      // Per guidelines, assume success after triggering the dialog to mitigate race conditions
       setHasApiKey(true);
     } else {
       alert("请在 Vercel Settings -> Environment Variables 中配置 API_KEY 并重新部署。");
@@ -103,12 +104,11 @@ const App: React.FC = () => {
       setGeneratedImages(initialGenerated);
     } catch (error: any) {
       console.error(error);
-      // Handle key missing error specifically if the request fails
       if (error.message && error.message.includes("Requested entity was not found")) {
         setHasApiKey(false);
         if (window.aistudio) await window.aistudio.openSelectKey();
       }
-      alert(error.message || "分析出现异常，建议换一个产品的 ASIN 或尝试输入更详细的产品名称。");
+      alert(error.message || "分析出现异常，请尝试切换模型或重新输入。");
     } finally {
       setLoading(false);
     }
@@ -125,7 +125,7 @@ const App: React.FC = () => {
       if (type === 'base') setBaseImage(url);
       else setEffectImage(url);
     } catch (e: any) {
-      alert("生成失败，请检查 API Key 权限。");
+      alert("生成失败，如果是 429 错误请尝试切换到 Flash 模型。");
     }
   };
 
@@ -145,17 +145,18 @@ const App: React.FC = () => {
       )}
       
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex items-center gap-3 shrink-0">
             <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center text-white text-xl shadow-lg">
               <i className="fa-brands fa-amazon"></i>
             </div>
-            <h1 className="text-xl font-black text-slate-900">AMZ 视觉智造</h1>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight">AMZ 视觉智造</h1>
           </div>
-          <div className="flex w-full md:w-auto gap-2">
+          
+          <div className="flex flex-1 w-full gap-2 items-center">
             <input 
-              className="flex-1 md:w-96 px-4 py-2 bg-slate-100 border border-transparent rounded-xl focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none text-sm transition-all"
-              placeholder="输入 ASIN、链接 或 产品关键词 (如: Sony WH-1000XM5)"
+              className="flex-1 px-4 py-2.5 bg-slate-100 border border-transparent rounded-xl focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none text-sm transition-all"
+              placeholder="输入 ASIN 或 亚马逊产品链接"
               value={asinInput}
               onChange={(e) => setAsinInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
@@ -163,9 +164,24 @@ const App: React.FC = () => {
             <button 
               onClick={handleAnalyze}
               disabled={loading}
-              className="bg-orange-500 text-white px-6 py-2 rounded-xl font-bold text-sm hover:bg-orange-600 disabled:opacity-50 transition-all"
+              className="bg-orange-500 text-white px-6 py-2.5 rounded-xl font-bold text-sm hover:bg-orange-600 disabled:opacity-50 transition-all shadow-md active:scale-95"
             >
               {loading ? <i className="fa-solid fa-spinner fa-spin"></i> : "开始分析"}
+            </button>
+          </div>
+
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+            <button 
+              onClick={() => setSelectedModel('gemini-3-flash-preview')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedModel === 'gemini-3-flash-preview' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              <i className="fa-solid fa-bolt mr-1.5"></i>Flash
+            </button>
+            <button 
+              onClick={() => setSelectedModel('gemini-3-pro-preview')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedModel === 'gemini-3-pro-preview' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              <i className="fa-solid fa-brain mr-1.5"></i>Pro
             </button>
           </div>
         </div>
@@ -270,10 +286,20 @@ const App: React.FC = () => {
             <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <i className="fa-solid fa-magnifying-glass text-3xl text-orange-500"></i>
             </div>
-            <h2 className="text-2xl font-black text-slate-800 mb-2">等待开始分析</h2>
-            <p className="text-slate-400 max-w-sm mx-auto text-sm leading-relaxed">
-              输入亚马逊产品链接或 ASIN，我们将利用 AI 跨平台搜索产品规格并为您 design 全套视觉方案。
+            <h2 className="text-2xl font-black text-slate-800 mb-2">准备就绪</h2>
+            <p className="text-slate-400 max-w-sm mx-auto text-sm leading-relaxed mb-6">
+              输入 ASIN，我们将为您深度调研竞对并设计视觉套图。免费用户推荐使用 Flash 模型。
             </p>
+            <div className="flex justify-center gap-4">
+               <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 bg-white px-3 py-1.5 rounded-full border border-slate-200">
+                  <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
+                  FLASH: 极速 & 高配额
+               </div>
+               <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 bg-white px-3 py-1.5 rounded-full border border-slate-200">
+                  <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+                  PRO: 深度分析 & 思考模式
+               </div>
+            </div>
           </div>
         )}
       </main>
@@ -285,8 +311,8 @@ const App: React.FC = () => {
               <div className="absolute inset-0 border-4 border-orange-100 rounded-full"></div>
               <div className="absolute inset-0 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
             </div>
-            <h3 className="font-bold text-slate-900 mb-2">正在进行多维搜索...</h3>
-            <p className="text-[11px] text-slate-400">正在通过 Google Search 绕过反爬机制获取产品数据。这可能需要 10-20 秒。</p>
+            <h3 className="font-bold text-slate-900 mb-2">正在通过 {selectedModel.includes('pro') ? 'PRO' : 'FLASH'} 模型分析...</h3>
+            <p className="text-[11px] text-slate-400 leading-relaxed">正在全网搜寻产品规格。如果是 Pro 模型，AI 会通过“思考”绕过部分反爬限制。</p>
           </div>
         </div>
       )}

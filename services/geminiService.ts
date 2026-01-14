@@ -3,6 +3,12 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { ListingAnalysis, ImageAnalysisItem } from "../types";
 
 export class GeminiService {
+  private model: string;
+
+  constructor(model: string = 'gemini-3-flash-preview') {
+    this.model = model;
+  }
+
   private getApiKey(): string {
     const key = process.env.API_KEY;
     if (!key || key === 'undefined') {
@@ -11,7 +17,6 @@ export class GeminiService {
     return key;
   }
 
-  // Create a fresh instance of GoogleGenAI for each request to ensure the latest API Key is used
   private getAI() {
     return new GoogleGenAI({ apiKey: this.getApiKey() });
   }
@@ -19,22 +24,24 @@ export class GeminiService {
   async analyzeListing(asinOrUrl: string): Promise<{ data: ListingAnalysis, sources: any[] }> {
     try {
       const ai = this.getAI();
-      // 使用 gemini-3-flash-preview 替代 pro，以获得更高的免费配额
+      const isPro = this.model.includes('pro');
+      
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: this.model,
         contents: `你是一个亚马逊资深运营。请针对以下输入进行深度背景调查：
         输入内容：${asinOrUrl}
         
         任务指令：
-        1. 使用 Google Search 寻找该产品在全网的信息。
-        2. 提取：产品全名(title)、5个核心卖点(bulletPoints)、材质(material)、颜色(color)、尺寸(size)。
-        3. 如果信息不全，请根据常识推测。
+        1. 使用 Google Search 寻找该产品在亚马逊、官网或评测站的信息。
+        2. 如果直接链接被拦截，请搜索其型号或 ASIN 获取规格。
+        3. 提取：产品全名(title)、5个核心卖点(bulletPoints)、材质(material)、颜色(color)、尺寸(size)。
+        4. 信息不全时请根据类目常识提供合理预测。
         
         必须以 JSON 格式输出。`,
         config: {
           tools: [{ googleSearch: {} }],
-          // 降低思考预算以节省 Token，防止触发配额限制
-          thinkingConfig: { thinkingBudget: 0 }, 
+          // 仅在 Pro 模型下启用思考模式以解决配额和精度问题
+          thinkingConfig: { thinkingBudget: isPro ? 4000 : 0 }, 
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -71,12 +78,12 @@ export class GeminiService {
     } catch (e: any) {
       console.error("Gemini Analysis Error:", e);
       if (e.message?.includes("429") || e.message?.includes("quota")) {
-        throw new Error("API 配额已耗尽。请稍后再试，或前往 Google AI Studio 检查您的 API Key 是否绑定了结算账户。建议使用付费项目的 Key 以获得更稳定的体验。");
+        throw new Error("当前模型配额已耗尽。请切换到 Flash 模型，或检查您的 API Key 结算状态。");
       }
       if (e.message === "API_KEY_MISSING") {
-        throw new Error("未检测到 API Key，请确保已正确配置。");
+        throw new Error("未检测到 API Key。");
       }
-      throw new Error("分析失败。请检查 ASIN 是否正确，或者直接输入产品全名进行搜索。");
+      throw new Error("分析失败。如果正在使用 Pro 模型且报错，请尝试切换到 Flash 模型。");
     }
   }
 
@@ -109,7 +116,6 @@ export class GeminiService {
 
   async generateProductImage(prompt: string, aspectRatio: "1:1" | "16:9" | "4:3" | "3:4" | "9:16" = "1:1"): Promise<string> {
     const ai = this.getAI();
-    // 降级为 gemini-2.5-flash-image 以确保免费配额可用
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: { parts: [{ text: prompt }] },
