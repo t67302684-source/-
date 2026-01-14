@@ -3,32 +3,37 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { ListingAnalysis, ImageAnalysisItem } from "../types";
 
 export class GeminiService {
-  /* 显式获取 API Key 并进行校验 */
   private getApiKey(): string {
     const key = process.env.API_KEY;
     if (!key || key === 'undefined') {
-      // 如果没有获取到 Key，抛出更具体的错误，App.tsx 会捕获并引导用户
       throw new Error("API_KEY_MISSING");
     }
     return key;
   }
 
+  // Create a fresh instance of GoogleGenAI for each request to ensure the latest API Key is used
   private getAI() {
-    const apiKey = this.getApiKey();
-    return new GoogleGenAI({ apiKey });
+    return new GoogleGenAI({ apiKey: this.getApiKey() });
   }
 
   async analyzeListing(asinOrUrl: string): Promise<{ data: ListingAnalysis, sources: any[] }> {
     try {
       const ai = this.getAI();
-      /* Using gemini-3-pro-preview for complex grounding tasks */
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
-        contents: `请搜索亚马逊产品 ASIN/链接: ${asinOrUrl}。
-        提取以下信息：标题 (Title)、5个卖点 (Bullet Points)、材质 (Material)、颜色 (Color)、尺寸 (Size)。
-        请务必详细分析。输出必须为 JSON 格式。`,
+        contents: `你是一个亚马逊资深运营。请针对以下输入进行深度背景调查：
+        输入内容：${asinOrUrl}
+        
+        任务指令：
+        1. 使用 Google Search 寻找该产品在全网（亚马逊、官网、评测站）的信息。
+        2. 如果直接访问链接被拦截，请搜索其型号名称或 ASIN 相关的参数规格。
+        3. 提取：产品全名(title)、5个核心卖点(bulletPoints)、材质(material)、颜色(color)、尺寸(size)。
+        4. 如果某些信息实在找不到，请根据产品类别和常识提供“合理的建议值”并在 other 字段中注明。
+        
+        必须以 JSON 格式输出，不要包含任何其他文字。`,
         config: {
           tools: [{ googleSearch: {} }],
+          thinkingConfig: { thinkingBudget: 4000 },
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -42,7 +47,8 @@ export class GeminiService {
                   color: { type: Type.STRING },
                   size: { type: Type.STRING },
                   other: { type: Type.STRING }
-                }
+                },
+                required: ["material", "color", "size"]
               }
             },
             required: ["title", "bulletPoints", "productAttributes"]
@@ -51,18 +57,23 @@ export class GeminiService {
       });
 
       const text = response.text;
-      if (!text) throw new Error("模型未返回有效数据。");
+      if (!text) throw new Error("SEARCH_FAILED");
       
       const data = JSON.parse(text);
+      
+      if (!data.title || !data.bulletPoints || data.bulletPoints.length === 0) {
+        throw new Error("INCOMPLETE_DATA");
+      }
+
       const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       return { data, sources };
     } catch (e: any) {
       console.error("Gemini Analysis Error:", e);
       if (e.message === "API_KEY_MISSING") {
-        throw new Error("未检测到 API Key，请确保 Vercel 环境变量中 API_KEY 已正确配置。");
+        throw new Error("未检测到 API Key，请确保已正确配置。");
       }
-      if (e.message?.includes("permission denied") || e.message?.includes("403")) {
-        throw new Error("API 权限错误：请检查您的 Key 是否属于已开启结算(Billing)的付费项目。");
+      if (e.message === "SEARCH_FAILED" || e.message === "INCOMPLETE_DATA") {
+        throw new Error("由于目标平台限制（反爬虫），AI 无法直接抓取该页面。请尝试输入：产品名称 + 核心参数，或者直接输入官网产品页链接。");
       }
       throw e;
     }
@@ -86,7 +97,8 @@ export class GeminiService {
               content: { type: Type.STRING },
               designStrategy: { type: Type.STRING },
               aiPromptScript: { type: Type.STRING }
-            }
+            },
+            required: ["mainTitle", "content"]
           }
         }
       }
@@ -94,13 +106,13 @@ export class GeminiService {
     return JSON.parse(response.text || '[]');
   }
 
-  async generateProductImage(prompt: string, aspectRatio: "1:1" | "16:9" | "4:3" = "1:1"): Promise<string> {
+  async generateProductImage(prompt: string, aspectRatio: "1:1" | "16:9" | "4:3" | "3:4" | "9:16" = "1:1"): Promise<string> {
     const ai = this.getAI();
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: 'gemini-3-pro-image-preview',
       contents: { parts: [{ text: prompt }] },
       config: {
-        imageConfig: { aspectRatio }
+        imageConfig: { aspectRatio, imageSize: "1K" }
       }
     });
 
@@ -108,7 +120,7 @@ export class GeminiService {
     if (part?.inlineData) {
       return `data:image/png;base64,${part.inlineData.data}`;
     }
-    throw new Error("图像生成失败，模型未返回图像数据。");
+    throw new Error("图像生成失败。");
   }
 
   async editImage(base64Image: string, editPrompt: string): Promise<string> {
@@ -125,7 +137,7 @@ export class GeminiService {
               mimeType: 'image/png'
             }
           },
-          { text: `Based on this image, please edit it: ${editPrompt}. Keep product consistency.` }
+          { text: `Modify this image: ${editPrompt}. Maintain product structure.` }
         ]
       },
       config: {
