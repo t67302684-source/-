@@ -13,8 +13,8 @@ interface AIStudio {
 
 declare global {
   interface Window {
-    // Restoring readonly and ensuring correct type alignment to fix "identical modifiers" and "subsequent property declarations" errors.
-    readonly aistudio: AIStudio;
+    // Fix: Remove readonly modifier and ensure consistent type declaration
+    aistudio: AIStudio;
   }
 }
 
@@ -26,20 +26,19 @@ const App: React.FC = () => {
   const [imageConcepts, setImageConcepts] = useState<ImageAnalysisItem[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImageItem[]>([]);
   
-  // 核心逻辑：如果 process.env.API_KEY 存在，则初始 hasApiKey 为 true
-  const [hasApiKey, setHasApiKey] = useState<boolean>(!!process.env.API_KEY);
+  // 检查环境变量是否有效
+  const isEnvKeyAvailable = !!process.env.API_KEY && process.env.API_KEY !== 'undefined';
+  const [hasApiKey, setHasApiKey] = useState<boolean>(isEnvKeyAvailable);
 
   const gemini = new GeminiService();
 
   useEffect(() => {
     const checkKey = async () => {
-      // 如果环境变量已有，直接确认并退出检查
-      if (process.env.API_KEY) {
+      if (isEnvKeyAvailable) {
         setHasApiKey(true);
         return;
       }
-
-      // 如果没有环境变量，检查是否在 AI Studio 预览环境中
+      // 如果没有环境变量，检查 AI Studio 注入的 Key
       if (window.aistudio) {
         try {
           const selected = await window.aistudio.hasSelectedApiKey();
@@ -47,29 +46,31 @@ const App: React.FC = () => {
         } catch (e) {
           setHasApiKey(false);
         }
-      } else {
-        setHasApiKey(false);
       }
     };
     checkKey();
-  }, []);
+  }, [isEnvKeyAvailable]);
 
   const handleSelectKey = async () => {
     if (window.aistudio) {
       await window.aistudio.openSelectKey();
-      // Assume success after triggering the dialog to mitigate race conditions
       setHasApiKey(true);
     } else {
-      alert("请在 Vercel 后台配置 API_KEY 环境变量，或在 AI Studio 中使用。");
+      alert("请在 Vercel 项目设置的 Environment Variables 中添加 API_KEY，然后重新 Redeploy 项目。");
     }
   };
 
   const handleAnalyze = async () => {
     if (!asinInput) return;
     
-    // 如果没有任何形式的 Key，且在 AI Studio 中，则引导选择
-    if (!process.env.API_KEY && !hasApiKey && window.aistudio) {
-      await handleSelectKey();
+    // 如果没有 Key 且没有环境变量，提示用户
+    if (!hasApiKey && !isEnvKeyAvailable) {
+      if (window.aistudio) {
+        await handleSelectKey();
+      } else {
+        alert("检测不到 API Key。请前往 Vercel 控制台设置 API_KEY 环境变量并重新部署。");
+        return;
+      }
     }
     
     setLoading(true);
@@ -104,16 +105,11 @@ const App: React.FC = () => {
       setGeneratedImages(initialGenerated);
     } catch (error: any) {
       console.error(error);
-      // 如果 Key 无效，重置状态并提示重新选择 (Gemini API billing/key issues often surface as 403 or 404)
-      if (error.message?.includes("Requested entity was not found") || error.message?.includes("403")) {
-        if (!process.env.API_KEY) {
-          setHasApiKey(false);
-          if (window.aistudio) await window.aistudio.openSelectKey();
-        } else {
-          alert("检测到 API Key 无效，请检查 Vercel 环境变量配置是否正确，并确保已开启账单结算。");
-        }
+      if (error.message?.includes("API_KEY_MISSING") || error.message?.includes("403")) {
+        alert("API Key 无效或未设置。请确保 Vercel 环境变量 API_KEY 已设置并已 Redeploy。");
+        setHasApiKey(false);
       } else {
-        alert(error.message || "分析失败，请稍后重试。");
+        alert(error.message || "分析失败，请检查网络或 ASIN 是否正确。");
       }
     } finally {
       setLoading(false);
@@ -134,7 +130,7 @@ const App: React.FC = () => {
         setEffectImage(url);
       }
     } catch (e: any) {
-      alert("生成失败，请检查 API Key 权限。");
+      alert("生成失败，请检查 API Key 权限或余额。");
     }
   };
 
@@ -143,25 +139,19 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen pb-20 bg-slate-50 font-sans">
-      {/* 核心判断：只有当环境变量不存在 且 hasApiKey 为 false 时才显示 */}
-      {!process.env.API_KEY && !hasApiKey && (
-        <div className="bg-orange-600 text-white py-3 px-4 flex justify-center items-center gap-4 sticky top-0 z-[100] shadow-lg">
+      {/* 提示条逻辑 */}
+      {!hasApiKey && !isEnvKeyAvailable && (
+        <div className="bg-red-600 text-white py-3 px-4 flex justify-center items-center gap-4 sticky top-0 z-[100] shadow-lg">
           <span className="text-sm font-medium">
-            <i className="fa-solid fa-key mr-2"></i>
-            当前环境未检测到 API Key
+            <i className="fa-solid fa-triangle-exclamation mr-2"></i>
+            未配置 API Key。请在 Vercel 设置中添加 API_KEY 变量。
           </span>
-          <button 
-            onClick={handleSelectKey}
-            className="bg-white text-orange-600 px-4 py-1 rounded-full text-xs font-bold hover:bg-slate-100 transition-colors"
-          >
-            去设置
-          </button>
           <a 
             href="https://ai.google.dev/gemini-api/docs/billing" 
             target="_blank" 
-            className="text-[10px] underline opacity-80"
+            className="text-xs underline opacity-90"
           >
-            关于付费 API 说明
+            获取 API Key 教程
           </a>
         </div>
       )}
