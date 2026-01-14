@@ -13,8 +13,8 @@ interface AIStudio {
 
 declare global {
   interface Window {
-    // Removed readonly modifier to avoid "identical modifiers" error and match default Window property traits
-    aistudio: AIStudio;
+    // Restoring readonly and ensuring correct type alignment to fix "identical modifiers" and "subsequent property declarations" errors.
+    readonly aistudio: AIStudio;
   }
 }
 
